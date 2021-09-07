@@ -8,6 +8,9 @@ import java.awt.Rectangle;
 import java.awt.Toolkit;
 import java.awt.event.ComponentEvent;
 import java.awt.event.ComponentListener;
+import java.awt.event.KeyEvent;
+import java.awt.event.KeyListener;
+
 import javax.swing.JFrame;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
@@ -15,7 +18,7 @@ import javax.swing.event.CaretEvent;
 import javax.swing.event.CaretListener;
 import javax.swing.text.BadLocationException;
 
-public class MovementListener implements CaretListener, ComponentListener {
+public class MovementListener implements CaretListener, ComponentListener, KeyListener {
 	private final float SCALE = Toolkit.getDefaultToolkit().getScreenResolution() / 96.0f;
 	private final int VERTICAL_SHIFT = (int) (17 * SCALE); //These only work for 12pt monospaced
 	private final int HORIZONTAL_SHIFT = (int) (7 * SCALE);
@@ -44,23 +47,18 @@ public class MovementListener implements CaretListener, ComponentListener {
 		return virtualBounds;
 	}
 	
+	boolean lockEvents = false;
+	
 	int lastCaretPosition = 0;
 	int lastLineCaretXPosition = 0;
 	int lastLineOfCaret = 0;
 	String originalString = "";
-	
-	int ignoreCaretMove = 0;
-	int ignoreFrameMove = 0;
-	
 	Point originalLocation;
 	int accumMoveX = 0;
 	int accumMoveY = 0;
 	
 	public void caretUpdate(CaretEvent unused) {
-		if (ignoreCaretMove > 0) {
-			ignoreCaretMove--;
-			return;
-		}
+		if (lockEvents) return;
 		int newCaretPosition = area.getCaretPosition();
 		if (lastCaretPosition == newCaretPosition) return;
 		int newLineOfCaret = getCaretY();
@@ -71,25 +69,38 @@ public class MovementListener implements CaretListener, ComponentListener {
 		
 		if (newX < 0 || newX + frame.getWidth() >= bounds.width || newY < 0 || newY + frame.getHeight() >= bounds.height) {
 			Toolkit.getDefaultToolkit().beep();
+			lockEvents = true;
 			SwingUtilities.invokeLater(() -> {
 				Toolkit.getDefaultToolkit().beep();
 				area.setText(originalString);
 				if (lastCaretPosition != newCaretPosition) {
-					ignoreCaretMove++;
+					//events should already be locked at this point
 					area.setCaretPosition(lastCaretPosition);
 				}
 			});
 		} else {
-			ignoreFrameMove++;
 			accumMoveX = 0;
 			accumMoveY = 0;
-			frame.setLocation(newX,newY);
+			lockEvents = true;
+			frame.setLocation(newX,newY-5);
 			originalLocation = frame.getLocation();
 			lastCaretPosition = newCaretPosition;
 			lastLineCaretXPosition = newLineCaretXPosition;
 			lastLineOfCaret = newLineOfCaret;
 			originalString = area.getText();
+			SwingUtilities.invokeLater(() -> {
+				try {
+					Thread.sleep(25);
+				} catch (InterruptedException e) {}
+				frame.setLocation(newX,newY);
+				try {
+					Thread.sleep(25);
+				} catch (InterruptedException e) {}
+			});
 		}
+		SwingUtilities.invokeLater(() -> {
+			lockEvents = false;
+		});
 	}
 	
 	private int getCaretX() {
@@ -114,10 +125,7 @@ public class MovementListener implements CaretListener, ComponentListener {
 	@Override
 	public void componentMoved(ComponentEvent e) {
 		if (e.getComponent() == frame) {
-			if (ignoreFrameMove > 0) {
-				ignoreFrameMove--;
-				return;
-			}
+			if (lockEvents) return;
 			
 			Point newLocation = frame.getLocation();
 			int deltaX = newLocation.x - originalLocation.x;
@@ -129,7 +137,7 @@ public class MovementListener implements CaretListener, ComponentListener {
 			while (accumMoveX >= HORIZONTAL_SHIFT) {
 				accumMoveX -= HORIZONTAL_SHIFT;
 				if (getCaretX() > 0) {
-					ignoreCaretMove++;
+					lockEvents = true;
 					int newPosition = area.getCaretPosition()-1;
 					area.setCaretPosition(newPosition);
 					lastCaretPosition = newPosition;
@@ -141,7 +149,7 @@ public class MovementListener implements CaretListener, ComponentListener {
 			while (accumMoveX <= -HORIZONTAL_SHIFT) {
 				accumMoveX += HORIZONTAL_SHIFT;
 				if (area.getCaretPosition() < getEndOfLineOffset(getCaretY())-1) {
-					ignoreCaretMove++;
+					lockEvents = true;
 					int newPosition = area.getCaretPosition()+1;
 					area.setCaretPosition(newPosition);
 					lastCaretPosition = newPosition;
@@ -160,6 +168,10 @@ public class MovementListener implements CaretListener, ComponentListener {
 			}
 			
 			originalLocation = newLocation;
+			
+			SwingUtilities.invokeLater(() -> {
+				lockEvents = false;
+			});
 		}
 	}
 	
@@ -181,12 +193,13 @@ public class MovementListener implements CaretListener, ComponentListener {
 			int startOffset = area.getLineStartOffset(currY-1);
 			int endOffset = area.getLineEndOffset(currY-1);
 			if (startOffset + currX >= endOffset) {
+				lockEvents = true;
 				area.setCaretPosition(endOffset - 1);
 			} else {
+				lockEvents = true;
 				area.setCaretPosition(startOffset + currX);
 			}
 			if (area.getCaretPosition() != start) {
-				ignoreCaretMove++;
 				lastCaretPosition = area.getCaretPosition();
 				lastLineCaretXPosition = getCaretX();
 				lastLineOfCaret = getCaretY();
@@ -204,30 +217,33 @@ public class MovementListener implements CaretListener, ComponentListener {
 			if (currX > 0) {
 				return;
 			} else {
+				lockEvents = true;
 				area.append("\n");
-				ignoreCaretMove++;
 				area.setCaretPosition(area.getText().length());
 				lastCaretPosition = area.getCaretPosition();
 				lastLineCaretXPosition = getCaretX();
 				lastLineOfCaret = getCaretY();
 				return;
+				
 			}
 		}
 		try {
 			int startOffset = area.getLineStartOffset(currY+1);
 			int endOffset = area.getLineEndOffset(currY+1);
-			if (startOffset + currX >= endOffset) {
+			if (startOffset + currX > endOffset) {
+				lockEvents = true;
 				area.setCaretPosition(endOffset - 1);
 			} else {
+				lockEvents = true;
 				area.setCaretPosition(startOffset + currX);
 			}
 			if (area.getCaretPosition() != start) {
-				ignoreCaretMove++;
 				lastCaretPosition = area.getCaretPosition();
 				lastLineCaretXPosition = getCaretX();
 				lastLineOfCaret = getCaretY();
 			}
 		} catch (BadLocationException e) {
+			e.printStackTrace();
 			return;
 		}
 	}
@@ -237,4 +253,32 @@ public class MovementListener implements CaretListener, ComponentListener {
 
 	@Override
 	public void componentHidden(ComponentEvent e) {}
+	
+	@Override
+	public void keyPressed(KeyEvent e) {
+		switch (e.getKeyCode()) {
+			case KeyEvent.VK_ENTER:
+			case KeyEvent.VK_LEFT:
+			case KeyEvent.VK_RIGHT:
+			case KeyEvent.VK_UP:
+			case KeyEvent.VK_DOWN:
+			case KeyEvent.VK_PAGE_UP:
+			case KeyEvent.VK_PAGE_DOWN:
+			case KeyEvent.VK_HOME:
+			case KeyEvent.VK_END:
+			case KeyEvent.VK_KP_UP:
+			case KeyEvent.VK_KP_DOWN:
+			case KeyEvent.VK_KP_LEFT:
+			case KeyEvent.VK_KP_RIGHT:
+				e.consume();
+			default:
+				return;
+		}
+	}
+	
+	@Override
+	public void keyReleased(KeyEvent e) {}
+	
+	@Override
+	public void keyTyped(KeyEvent e) {}
 }

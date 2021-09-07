@@ -41,6 +41,7 @@ public final class Main {
 		
 		MovementListener listener = new MovementListener(frame, textArea);
 		textArea.addCaretListener(listener);
+		textArea.addKeyListener(listener);
 		frame.addComponentListener(listener);
 		
 		frame.setVisible(true);
